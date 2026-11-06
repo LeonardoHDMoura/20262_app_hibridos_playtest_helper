@@ -21,6 +21,47 @@ Abra no **Expo Go** (Android/iOS) lendo o QR code. Os módulos usados (`expo-sql
 | `npm run typecheck` | `tsc` no app e nos testes |
 | `npm run lint` | ESLint (config do Expo) |
 
+## Relay (eventos automáticos do jogo)
+
+```
+[Jogo Unity] --HTTP POST--> [Relay Node no PC :8787] --WebSocket--> [App Expo no celular]
+```
+
+O Expo Go não consegue abrir um servidor no celular, mas o cliente `WebSocket` já vem no React Native. Por isso um script Node pequeno, que roda no PC, faz a ponte. Ele fica em [`relay/`](relay/) e tem o próprio `package.json`.
+
+```bash
+cd relay
+npm install
+npm start                       # imprime os IPs para digitar no app
+npm run simulate                # em outro terminal: sessão falsa em tempo real (~2,5 min)
+npm run simulate -- --speed 5   # a mesma sessão, 5x mais rápida
+```
+
+| Rota | O que faz |
+| --- | --- |
+| `POST /events` | Recebe um evento ou uma lista. Responde `204`, ou `400` com a mensagem de erro. Um lote com algum evento inválido é rejeitado inteiro |
+| `GET /health` | `{ ok, clients, sessionId, events }` |
+| WebSocket `/ws` | Ao conectar, envia `{ kind: "replay", events }`. Depois, `{ kind: "event", event }` a cada evento novo |
+
+- Um `session_start` com `sessionId` novo descarta o buffer da sessão anterior. Eventos repetidos (mesmo `sessionId + seq`) e eventos de outra sessão são ignorados.
+- Se o relay for reiniciado no meio de uma partida, ele adota o `sessionId` do primeiro evento que chegar.
+- Variáveis de ambiente: `PORT` (padrão `8787`) e `HOST` (padrão `0.0.0.0`).
+- O simulador cobre tutorial, alertas, caças, perdas do jogador, uma captura, chaves, garrafas e a fuga. Ele também manda um lote e um reenvio duplicado de propósito.
+
+Teste manual:
+
+```bash
+curl http://localhost:8787/health
+curl -X POST http://localhost:8787/events -H "Content-Type: application/json" -d "{\"v\":1,\"sessionId\":\"teste\",\"seq\":0,\"type\":\"session_start\",\"t\":0,\"data\":{}}"
+```
+
+**Avisos de rede**
+
+- O celular e o PC precisam estar na **mesma rede**. O PC pode estar no cabo, desde que seja o mesmo roteador. Com `npx expo start --tunnel`, o app carrega, mas o relay **não** passa pelo túnel: o endereço continua sendo o IP local do PC.
+- Na primeira execução, o Firewall do Windows pode pedir permissão para o Node. Permita em **redes privadas**.
+- Redes de faculdade costumam isolar os aparelhos entre si. O plano B é ligar o roteador do celular (hotspot) e conectar o PC nele.
+- Se o relay listar mais de um IP, use o da placa ligada ao roteador. Adaptadores virtuais (VirtualBox, vEthernet) não são alcançáveis pelo celular.
+
 ## Fluxo
 
 1. **Início:** digite o participante (ex.: `P03`) e toque em **Iniciar partida** no instante em que o jogador começa.
