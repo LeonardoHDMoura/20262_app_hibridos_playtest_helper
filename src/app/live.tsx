@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useMemo } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { LiveClock } from '../components/LiveClock.tsx';
+import { SessionSummary } from '../components/SessionSummary.tsx';
 import { TimelineList } from '../components/TimelineList.tsx';
 import { colors, radius } from '../components/theme.ts';
 import { MANUAL_EVENT_TYPES } from '../domain/eventTypes.ts';
@@ -73,6 +74,8 @@ export default function LiveScreen() {
           {gameLine}
         </Text>
       </View>
+
+      <SessionSummary game={game} observerEvents={events} compact />
 
       {ended && (
         <View style={styles.banner}>

@@ -2,12 +2,12 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { SessionSummary } from '../../components/SessionSummary.tsx';
 import { TimelineChart } from '../../components/TimelineChart.tsx';
 import { TimelineItemRow } from '../../components/TimelineItemRow.tsx';
 import { colors, radius } from '../../components/theme.ts';
 import { deleteSession, loadSession, type LoadedSession } from '../../db/database.ts';
-import { MANUAL_EVENT_TYPES } from '../../domain/eventTypes.ts';
-import { countByType, formatMs } from '../../domain/format.ts';
+import { formatMs } from '../../domain/format.ts';
 import { secondsAt, sessionDuration, timelineOriginMs } from '../../domain/session.ts';
 import { timelineToCsv } from '../../lib/exportCsv.ts';
 import { buildTimeline } from '../../lib/timeline.ts';
@@ -47,7 +47,6 @@ export default function SessionTimelineScreen() {
   const endMs = session.endedAt ?? session.startedAt;
   const duration = sessionDuration(session, endMs);
   const durationSec = secondsAt(timelineOriginMs(session, game), endMs);
-  const counts = countByType(events);
   const gameCount = items.filter((i) => i.source === 'game').length;
 
   const onShare = () => {
@@ -81,14 +80,7 @@ export default function SessionTimelineScreen() {
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Resumo</Text>
-        <View style={styles.chips}>
-          {MANUAL_EVENT_TYPES.map((t) => (
-            <View key={t.id} style={[styles.chip, { borderColor: t.color }]}>
-              <Text style={[styles.chipCount, { color: t.color }]}>{counts.get(t.id) ?? 0}</Text>
-              <Text style={styles.chipLabel}>{t.label}</Text>
-            </View>
-          ))}
-        </View>
+        <SessionSummary game={game} observerEvents={events} />
       </View>
 
       <View style={styles.card}>
@@ -128,10 +120,6 @@ const styles = StyleSheet.create({
   duration: { fontSize: 16, fontWeight: '600', color: colors.text, fontVariant: ['tabular-nums'] },
   muted: { color: colors.muted, fontSize: 13 },
   sectionTitle: { fontSize: 13, fontWeight: '700', color: colors.muted, textTransform: 'uppercase', marginBottom: 6 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { borderWidth: 1.5, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, minWidth: '30%', flexGrow: 1 },
-  chipCount: { fontSize: 20, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  chipLabel: { fontSize: 12, color: colors.text },
   primaryButton: { backgroundColor: colors.primary, borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
   primaryButtonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   deleteButton: { paddingVertical: 12, alignItems: 'center' },

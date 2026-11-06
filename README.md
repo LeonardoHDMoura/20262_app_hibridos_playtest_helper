@@ -140,6 +140,25 @@ Os testes de [`tests/database.test.ts`](tests/database.test.ts) rodam esse códi
 - **`AppState`:** quando o app vai para o segundo plano ou volta, o provider grava os eventos automáticos `app_segundo_plano` e `app_voltou`. Eles aparecem na raia “Sistema” da linha do tempo e mostram **lacunas de observação**, o que é útil para não tirar conclusões erradas de um trecho em que ninguém estava olhando.
 - **`useKeepAwake`** na tela da partida impede que a tela apague sozinha.
 
+### 5. Resumo da sessão (derivado, nunca guardado)
+
+[`summarizeGame`](src/lib/sessionSummary.ts) recalcula o resumo a partir dos eventos do jogo sempre que eles mudam. Ele aparece completo na tela da sessão e numa faixa compacta na tela da partida.
+
+| Métrica | De onde vem |
+| --- | --- |
+| Tutorial | `tutorial_end.durationSec` |
+| Tentativas | maior `attempt` / `attempts` visto (mínimo 1) |
+| Capturas | quantidade de `player_caught` |
+| Chaves | último `total` / `required` de `key_collected` |
+| Garrafas | maior `total` de `bottle_thrown` |
+| Entrou em alerta | transições `patrol → alert` |
+| Entrou em caça | entradas em `chase` |
+| Perdeu o jogador | saídas de `chase` **sem** captura durante a caça |
+| Tempo em caça | soma dos intervalos em `chase`. Uma caça ainda aberta conta até o `session_end` ou até o último evento |
+| Eventos faltando | lacunas na sequência de `seq` |
+
+**Decisão:** na linha do tempo, toda saída de `chase` aparece como "Monstro perdeu o jogador", como manda o contrato, inclusive a volta à patrulha logo depois de uma captura. No resumo, uma caça em que houve `player_caught` conta como captura, não como perda.
+
 ## Estrutura
 
 ```
@@ -159,12 +178,13 @@ src/
     eventLabels.ts      evento do jogo → texto
     timeline.ts         linha do tempo unificada
     exportCsv.ts        CSV
+    sessionSummary.ts   resumo derivado dos eventos
   hooks/useGameEvents.ts      WebSocket com reconexão
   db/database.ts        schema, migração e consultas expo-sqlite
   state/                GameLinkProvider (conexão) e SessionProvider (useReducer + efeitos)
-  components/           relógio, linha do tempo, gráfico em raias, indicador de conexão
+  components/           relógio, linha do tempo, gráfico em raias, resumo, indicador de conexão
 relay/                  relay Node + simulador
-tests/                  node:test (reducer, relay, textos, banco)
+tests/                  node:test (reducer, relay, textos, banco, resumo)
 ```
 
 ## CSV exportado
