@@ -1,38 +1,35 @@
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
-import { formatMs } from '../domain/format.ts';
-import { elapsedAt, type Session } from '../domain/session.ts';
+import { formatSeconds } from '../lib/timeline.ts';
 import { colors } from './theme.ts';
 
 /**
- * Relógio da partida. O intervalo serve só para redesenhar: o valor exibido é
- * sempre recalculado a partir de timestamps absolutos, então não "atrasa" se o
- * JS ficar suspenso em segundo plano. O estado local fica aqui dentro para não
- * re-renderizar a tela inteira 10x por segundo.
+ * Relógio da sessão, no mesmo tempo da linha do tempo (o do jogo, quando há um
+ * ligado). O intervalo serve só para redesenhar: o valor é sempre recalculado a
+ * partir de `originMs`, então não "atrasa" se o JS ficar suspenso em segundo
+ * plano. `frozenAt` (segundos) para o relógio — usado quando o jogo encerrou.
  */
-export function LiveClock({ session }: { session: Session }) {
+export function LiveClock({ originMs, frozenAt = null }: { originMs: number; frozenAt?: number | null }) {
   const [now, setNow] = useState(() => Date.now());
-
-  const paused = session.pausedAt !== null;
+  const frozen = frozenAt !== null;
 
   useEffect(() => {
-    if (paused) return;
-    const id = setInterval(() => setNow(Date.now()), 100);
+    if (frozen) return;
+    const id = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(id);
-  }, [paused]);
+  }, [frozen]);
 
-  // Pausado, o tempo fica congelado exatamente no instante da pausa.
-  const shownAt = session.pausedAt ?? now;
-  return <Text style={[styles.clock, paused && styles.paused]}>{formatMs(elapsedAt(session, shownAt))}</Text>;
+  const seconds = frozen ? frozenAt : (now - originMs) / 1000;
+  return <Text style={[styles.clock, frozen && styles.frozen]}>{formatSeconds(seconds)}</Text>;
 }
 
 const styles = StyleSheet.create({
   clock: {
-    fontSize: 56,
+    fontSize: 48,
     fontWeight: '700',
     color: colors.text,
     fontVariant: ['tabular-nums'],
     textAlign: 'center',
   },
-  paused: { color: colors.warning },
+  frozen: { color: colors.muted },
 });

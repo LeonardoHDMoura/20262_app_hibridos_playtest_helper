@@ -62,13 +62,13 @@ export interface SessionSummary extends Session {
   eventCount: number;
 }
 
+// paused_ms/paused_at ficaram no schema v1 mas não são mais usados: o tempo
+// do jogo não para no pause, então a observação também não pausa.
 const toSession = (r: SessionRow): Session => ({
   id: r.id,
   label: r.label,
   startedAt: r.started_at,
   endedAt: r.ended_at,
-  pausedMs: r.paused_ms,
-  pausedAt: r.paused_at,
 });
 
 const toEvent = (r: EventRow): ObsEvent => ({
@@ -89,17 +89,11 @@ const toEvent = (r: EventRow): ObsEvent => ({
 
 export function insertSession(db: SQLiteDatabase, label: string, startedAt: number): Session {
   const res = db.runSync('INSERT INTO sessions (label, started_at) VALUES (?, ?)', label, startedAt);
-  return { id: res.lastInsertRowId, label, startedAt, endedAt: null, pausedMs: 0, pausedAt: null };
+  return { id: res.lastInsertRowId, label, startedAt, endedAt: null };
 }
 
-export function saveSessionTiming(db: SQLiteDatabase, s: Session): void {
-  db.runSync(
-    'UPDATE sessions SET ended_at = ?, paused_ms = ?, paused_at = ? WHERE id = ?',
-    s.endedAt,
-    s.pausedMs,
-    s.pausedAt,
-    s.id,
-  );
+export function saveSessionEnd(db: SQLiteDatabase, id: number, endedAt: number): void {
+  db.runSync('UPDATE sessions SET ended_at = ? WHERE id = ?', endedAt, id);
 }
 
 export function insertEvent(db: SQLiteDatabase, e: Omit<ObsEvent, 'id'>): ObsEvent {

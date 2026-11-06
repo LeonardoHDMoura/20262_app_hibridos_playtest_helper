@@ -66,8 +66,8 @@ curl -X POST http://localhost:8787/events -H "Content-Type: application/json" -d
 
 ## Fluxo
 
-1. **Início:** digite o participante (ex.: `P03`) e toque em **Iniciar partida** no instante em que o jogador começa.
-2. **Partida:** um relógio grande e seis botões coloridos com contador. Também há **Desfazer** (remove o último toque), **Pausar/Retomar** e **Encerrar**. A tela não apaga durante a partida.
+1. **Início:** digite o participante (ex.: `P03`) e toque em **Iniciar partida**. Se o relay estiver conectado, o `session_start` do jogo também cria uma sessão sozinho.
+2. **Partida:** um relógio, seis botões coloridos com contador e a **linha do tempo unificada**, que junta os eventos do jogo (fundo cinza, etiqueta “Jogo”) e as marcações (etiqueta azul “Observador”). A lista acompanha o item mais novo, a não ser que você role para cima. Também há **Desfazer** (remove o último toque) e **Encerrar**. A tela não apaga durante a partida.
 3. **Linha do tempo:** um resumo por tipo, um gráfico em raias (uma linha por tipo de evento), a lista completa com `mm:ss.d` e o botão **Compartilhar CSV**.
 
 Os tipos de evento ficam em [`src/domain/eventTypes.ts`](src/domain/eventTypes.ts). Para mudar os botões, basta editar essa lista.
@@ -82,8 +82,11 @@ O app **não conta tempo** com `setInterval`. Timers de JS congelam em segundo p
 
 ```ts
 // src/domain/session.ts
-tempo = agora - startedAt - pausedMs - (pausa atual em andamento)
+t = (horário do toque - origem) / 1000
+// origem = início manual, ou o t = 0 do jogo quando ele está ligado
 ```
+
+**Sincronização com o jogo:** cada evento do jogo diz “aconteceu em `t`” e chega num instante conhecido. `chegada − t` nunca é menor que a origem real, então o app guarda o **menor** valor visto. No `session_start` ao vivo, isso é exatamente `Date.now() − t·1000`. Se o app conectou no meio da partida, o `session_start` vem atrasado pelo replay, e o primeiro evento ao vivo corrige a origem. Marcações feitas antes do jogo começar ficam com `t` negativo. Não há pausa, porque o `t` do jogo também não para no pause.
 
 Por isso o relógio continua certo depois de o app ficar 5 minutos em segundo plano ou de ser morto e reaberto. O `setInterval` do [`LiveClock`](src/components/LiveClock.tsx) serve só para redesenhar a tela.
 
@@ -98,7 +101,7 @@ Além disso, o horário é capturado no **`onPressIn`**, quando o dedo toca a te
 | `HYDRATE` | Restaura a sessão aberta que veio do banco |
 | `START` | Começa uma nova partida |
 | `ADD_EVENT` / `REMOVE_EVENT` | Marca ou desfaz um evento (ignora duplicados e eventos de outra sessão) |
-| `PAUSE` / `RESUME` | Pausa ou retoma, acumulando `pausedMs` |
+| `GAME_EVENTS` | Liga a sessão do jogo, junta os eventos sem repetir `sessionId + seq` e ajusta a origem do relógio |
 | `END` | Encerra a partida e limpa o estado ativo |
 
 O [`SessionProvider`](src/state/SessionProvider.tsx) envolve o app inteiro (em [`_layout.tsx`](src/app/_layout.tsx)) e expõe dois contextos, `useSessionState()` e `useSessionActions()`. Por estarem separados, um componente que só dispara ações não re-renderiza a cada evento.

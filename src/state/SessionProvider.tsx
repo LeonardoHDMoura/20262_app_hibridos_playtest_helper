@@ -4,25 +4,23 @@ import { Alert, AppState } from 'react-native';
 import * as db from '../db/database.ts';
 import { MANUAL_EVENT_TYPES } from '../domain/eventTypes.ts';
 import {
-  applyEnd,
-  applyPause,
-  applyResume,
-  elapsedAt,
+  groupByGameSession,
   initialSessionState,
+  routeGameEvents,
   sessionReducer,
   type ObsEvent,
   type Session,
   type SessionState,
 } from '../domain/session.ts';
+import type { GameEvent } from '../lib/relay.ts';
+import { useGameLink } from './GameLinkProvider.tsx';
 
 interface SessionActions {
   start: (label: string) => void;
   /** `pressedAt` deve ser capturado no onPressIn, para não somar o tempo do dedo na tela. */
   mark: (type: string, pressedAt?: number, note?: string | null) => void;
   undoLast: () => ObsEvent | null;
-  pause: () => void;
-  resume: () => void;
-  /** Encerra a partida e devolve o id da sessão encerrada. */
+  /** Encerra a observação e devolve o id da sessão encerrada. */
   end: () => number | null;
 }
 
@@ -31,21 +29,37 @@ const ActionsContext = createContext<SessionActions | null>(null);
 
 const MANUAL_IDS = new Set(MANUAL_EVENT_TYPES.map((t) => t.id));
 
+function labelForGame(events: readonly GameEvent[], at: number): string {
+  const start = events.find((e) => e.type === 'session_start');
+  const map = start && typeof start.data.map === 'string' ? start.data.map : null;
+  const time = new Date(at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return map ? `Jogo · ${map} · ${time}` : `Jogo · ${time}`;
+}
+
 /**
- * Estado global da partida em andamento.
+ * Estado global da observação em andamento, incluindo a sessão do jogo ligada.
  *
- * Regra de ouro: **persistir primeiro, despachar depois**. Toda action passa
- * pelo SQLite (escrita síncrona) antes de chegar ao reducer, então o que está
- * na tela nunca está "à frente" do que está no disco.
+ * Regra de ouro das marcações: **persistir primeiro, despachar depois** — toda
+ * marcação passa pelo SQLite (escrita síncrona) antes de chegar ao reducer.
+ * Eventos do jogo ainda ficam só na memória (etapa 3); se o app fechar, o
+ * replay do relay os devolve.
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const database = useSQLiteContext();
+  const { subscribe } = useGameLink();
   const [state, dispatch] = useReducer(sessionReducer, initialSessionState);
 
-  // Cópia síncrona da sessão: dois toques seguidos (antes do re-render) ou um
-  // toque logo após "pausar" precisam enxergar a versão mais nova.
+  // Cópias síncronas: dois eventos seguidos (antes do re-render) precisam
+  // enxergar a versão mais nova.
   const sessionRef = useRef<Session | null>(null);
   const eventsRef = useRef<ObsEvent[]>([]);
+  const gameIdRef = useRef<string | null>(null);
+  /** Jogos cujas observações foram encerradas: o replay não pode reabri-los. */
+  const finishedGamesRef = useRef(new Set<string>());
+  /** Eventos do jogo que chegaram antes de lermos o banco. */
+  const hydratedRef = useRef(false);
+  const pendingRef = useRef<{ events: GameEvent[]; receivedAt: number }[]>([]);
+
   useEffect(() => {
     eventsRef.current = state.events;
   }, [state.events]);
@@ -68,7 +82,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const event = db.insertEvent(database, {
           sessionId: session.id,
           type,
-          tMs: elapsedAt(session, wallMs),
+          tMs: wallMs - session.startedAt,
           wallMs,
           note,
         });
@@ -80,27 +94,94 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [database, guard],
   );
 
-  // 1) Reidratação: se o app morreu no meio da partida, a sessão aberta volta.
+  const startSession = useCallback(
+    (label: string, at: number): Session | null =>
+      guard('Iniciar sessão', () => {
+        const session = db.insertSession(database, label.trim() || 'Sem nome', at);
+        sessionRef.current = session;
+        eventsRef.current = [];
+        gameIdRef.current = null;
+        dispatch({ type: 'START', session });
+        return session;
+      }),
+    [database, guard],
+  );
+
+  const endSession = useCallback(
+    (at: number): number | null => {
+      const session = sessionRef.current;
+      if (!session) return null;
+      return guard('Encerrar', () => {
+        db.saveSessionEnd(database, session.id, at);
+        if (gameIdRef.current) finishedGamesRef.current.add(gameIdRef.current);
+        sessionRef.current = null;
+        eventsRef.current = [];
+        gameIdRef.current = null;
+        dispatch({ type: 'END', at });
+        return session.id;
+      });
+    },
+    [database, guard],
+  );
+
+  /** Decide o destino de cada lote do jogo (ver routeGameEvents) e despacha. */
+  const ingestGame = useCallback(
+    (events: GameEvent[], receivedAt: number) => {
+      if (!hydratedRef.current) {
+        pendingRef.current.push({ events, receivedAt });
+        return;
+      }
+      for (const [gameSessionId, group] of groupByGameSession(events)) {
+        const route = routeGameEvents(
+          {
+            hasOpenSession: sessionRef.current !== null,
+            linkedGameSessionId: gameIdRef.current,
+            finishedGameSessionIds: finishedGamesRef.current,
+          },
+          gameSessionId,
+          group,
+        );
+        if (route === 'ignore') continue;
+        if (route === 'replace') endSession(receivedAt);
+        if (route === 'start' || route === 'replace') {
+          if (!startSession(labelForGame(group, receivedAt), receivedAt)) continue;
+        }
+        gameIdRef.current = gameSessionId;
+        dispatch({ type: 'GAME_EVENTS', gameSessionId, events: group, receivedAt });
+      }
+    },
+    [endSession, startSession],
+  );
+
+  // 1) Reidratação: se o app morreu no meio da observação, ela volta.
   useEffect(() => {
     let cancelled = false;
+    const finish = (open: { session: Session; events: ObsEvent[] } | null) => {
+      if (cancelled) return;
+      sessionRef.current = open?.session ?? null;
+      eventsRef.current = open?.events ?? [];
+      dispatch({ type: 'HYDRATE', session: open?.session ?? null, events: open?.events ?? [] });
+      hydratedRef.current = true;
+      const pending = pendingRef.current;
+      pendingRef.current = [];
+      for (const p of pending) ingestGame(p.events, p.receivedAt);
+    };
     db.loadOpenSession(database)
-      .then((open) => {
-        if (cancelled) return;
-        sessionRef.current = open?.session ?? null;
-        dispatch({ type: 'HYDRATE', session: open?.session ?? null, events: open?.events ?? [] });
-      })
+      .then(finish)
       .catch((err) => {
         console.error(err);
-        dispatch({ type: 'HYDRATE', session: null, events: [] });
+        finish(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [database]);
+  }, [database, ingestGame]);
 
-  // 2) Segundo plano: não há nada pendente para "salvar às pressas" (tudo já foi
-  //    escrito), mas marcamos a ida/volta na linha do tempo para mostrar lacunas
-  //    de observação.
+  // 2) Eventos do jogo vindos do relay.
+  useEffect(() => subscribe((events, { receivedAt }) => ingestGame(events, receivedAt)), [subscribe, ingestGame]);
+
+  // 3) Segundo plano: nada fica pendente (tudo já foi escrito), mas a ida/volta
+  //    vira item da linha do tempo para mostrar lacunas de observação.
   useEffect(() => {
     let last = AppState.currentState;
     const sub = AppState.addEventListener('change', (next) => {
@@ -117,16 +198,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     () => ({
       start(label) {
         if (sessionRef.current) return;
-        guard('Iniciar partida', () => {
-          const session = db.insertSession(database, label.trim() || 'Sem nome', Date.now());
-          sessionRef.current = session;
-          dispatch({ type: 'START', session });
-        });
+        startSession(label, Date.now());
       },
 
       mark(type, pressedAt = Date.now(), note = null) {
-        const session = sessionRef.current;
-        if (!session || session.pausedAt !== null) return;
         recordEvent(type, pressedAt, note);
       },
 
@@ -141,46 +216,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         });
       },
 
-      pause() {
-        const session = sessionRef.current;
-        if (!session || session.pausedAt !== null) return;
-        const at = Date.now();
-        recordEvent('pausa', at);
-        guard('Pausar', () => {
-          const next = applyPause(session, at);
-          db.saveSessionTiming(database, next);
-          sessionRef.current = next;
-          dispatch({ type: 'PAUSE', at });
-        });
-      },
-
-      resume() {
-        const session = sessionRef.current;
-        if (!session || session.pausedAt === null) return;
-        const at = Date.now();
-        guard('Retomar', () => {
-          const next = applyResume(session, at);
-          db.saveSessionTiming(database, next);
-          sessionRef.current = next;
-          dispatch({ type: 'RESUME', at });
-        });
-        recordEvent('retomada', at);
-      },
-
       end() {
-        const session = sessionRef.current;
-        if (!session) return null;
-        const at = Date.now();
-        return guard('Encerrar', () => {
-          db.saveSessionTiming(database, applyEnd(session, at));
-          sessionRef.current = null;
-          eventsRef.current = [];
-          dispatch({ type: 'END', at });
-          return session.id;
-        });
+        return endSession(Date.now());
       },
     }),
-    [database, guard, recordEvent],
+    [database, guard, recordEvent, startSession, endSession],
   );
 
   return (

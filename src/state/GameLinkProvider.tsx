@@ -1,5 +1,5 @@
 import Storage from 'expo-sqlite/kv-store';
-import { createContext, useCallback, useContext, useMemo, useReducer, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { useGameEvents, type GameConnection } from '../hooks/useGameEvents.ts';
 import { mergeGameEvents, toRelayUrl, type GameEvent, type RelayMessage } from '../lib/relay.ts';
 
@@ -32,6 +32,9 @@ function feedReducer(state: GameFeed, action: FeedAction): GameFeed {
   };
 }
 
+/** Recebe cada lote do relay com o instante de chegada (base da sincronização de relógio). */
+export type GameEventsListener = (events: GameEvent[], info: { replay: boolean; receivedAt: number }) => void;
+
 interface GameLinkValue {
   /** Endereço como o usuário digitou (ex.: "192.168.0.12:8787"). */
   address: string;
@@ -41,6 +44,8 @@ interface GameLinkValue {
   connection: GameConnection;
   feed: GameFeed;
   clearFeed: () => void;
+  /** Inscreve um ouvinte dos eventos do jogo; devolve a função de cancelar. */
+  subscribe: (listener: GameEventsListener) => () => void;
 }
 
 const GameLinkContext = createContext<GameLinkValue | null>(null);
@@ -59,10 +64,23 @@ export function GameLinkProvider({ children }: { children: ReactNode }) {
   const url = useMemo(() => toRelayUrl(address), [address]);
   const [feed, dispatchFeed] = useReducer(feedReducer, initialFeed);
 
+  const listenersRef = useRef(new Set<GameEventsListener>());
+
   const onMessage = useCallback((msg: RelayMessage) => {
+    // Capturado assim que a mensagem chega, antes de qualquer processamento.
+    const receivedAt = Date.now();
     if (msg.kind === 'ping') return;
     const events = msg.kind === 'replay' ? msg.events : [msg.event];
-    dispatchFeed({ type: 'MESSAGE', events, replay: msg.kind === 'replay', at: Date.now() });
+    const replay = msg.kind === 'replay';
+    dispatchFeed({ type: 'MESSAGE', events, replay, at: receivedAt });
+    for (const listener of listenersRef.current) listener(events, { replay, receivedAt });
+  }, []);
+
+  const subscribe = useCallback((listener: GameEventsListener) => {
+    listenersRef.current.add(listener);
+    return () => {
+      listenersRef.current.delete(listener);
+    };
   }, []);
 
   const connection = useGameEvents(url, onMessage);
@@ -80,8 +98,8 @@ export function GameLinkProvider({ children }: { children: ReactNode }) {
   const clearFeed = useCallback(() => dispatchFeed({ type: 'CLEAR' }), []);
 
   const value = useMemo(
-    () => ({ address, url, setAddress, connection, feed, clearFeed }),
-    [address, url, setAddress, connection, feed, clearFeed],
+    () => ({ address, url, setAddress, connection, feed, clearFeed, subscribe }),
+    [address, url, setAddress, connection, feed, clearFeed, subscribe],
   );
 
   return <GameLinkContext.Provider value={value}>{children}</GameLinkContext.Provider>;

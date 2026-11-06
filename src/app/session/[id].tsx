@@ -67,7 +67,6 @@ export default function SessionTimelineScreen() {
         <Text style={styles.title}>{session.label}</Text>
         <Text style={styles.muted}>{new Date(session.startedAt).toLocaleString('pt-BR')}</Text>
         <Text style={styles.duration}>Duração: {formatMs(duration)}</Text>
-        {session.pausedMs > 0 && <Text style={styles.muted}>Tempo pausado (descontado): {formatMs(session.pausedMs)}</Text>}
       </View>
 
       <View style={styles.card}>

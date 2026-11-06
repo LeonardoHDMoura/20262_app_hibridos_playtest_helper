@@ -10,7 +10,7 @@ import { useSessionActions, useSessionState } from '../state/SessionProvider.tsx
 
 export default function HomeScreen() {
   const database = useSQLiteContext();
-  const { status, session } = useSessionState();
+  const { status, session, game } = useSessionState();
   const { start } = useSessionActions();
   const [label, setLabel] = useState('');
   const [history, setHistory] = useState<SessionSummary[]>([]);
@@ -46,7 +46,7 @@ export default function HomeScreen() {
             <View style={[styles.card, styles.activeCard]}>
               <Text style={styles.cardTitle}>Partida em andamento</Text>
               <Text style={styles.muted}>
-                {session.label} · {status === 'paused' ? 'pausada' : 'gravando'}
+                {session.label} · {game ? 'jogo ligado' : 'gravando'}
               </Text>
               <Pressable style={styles.primaryButton} onPress={() => router.push('/live')}>
                 <Text style={styles.primaryButtonText}>Voltar para a partida</Text>
