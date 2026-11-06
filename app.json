@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "App_hibridos",
-    "slug": "App_hibridos",
+    "name": "Playtest Helper",
+    "slug": "playtest-helper",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -20,6 +20,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-sqlite",
+      "expo-router"
+    ],
+    "scheme": "playtesthelper"
   }
 }
