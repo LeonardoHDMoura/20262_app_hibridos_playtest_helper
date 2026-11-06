@@ -153,11 +153,16 @@ Os testes de [`tests/database.test.ts`](tests/database.test.ts) rodam esse códi
 | Garrafas | maior `total` de `bottle_thrown` |
 | Entrou em alerta | transições `patrol → alert` |
 | Entrou em caça | entradas em `chase` |
-| Perdeu o jogador | saídas de `chase` **sem** captura durante a caça |
-| Tempo em caça | soma dos intervalos em `chase`. Uma caça ainda aberta conta até o `session_end` ou até o último evento |
+| Perdeu o jogador | toda saída de `chase`, menos o reset do monstro causado por uma captura |
+| Tempo em caça | soma dos intervalos em `chase`. A captura encerra a caça. Uma caça ainda aberta conta até o `session_end` ou até o último evento |
 | Eventos faltando | lacunas na sequência de `seq` |
 
-**Decisão:** na linha do tempo, toda saída de `chase` aparece como "Monstro perdeu o jogador", como manda o contrato, inclusive a volta à patrulha logo depois de uma captura. No resumo, uma caça em que houve `player_caught` conta como captura, não como perda.
+**Decisão:** na linha do tempo, toda saída de `chase` aparece como "Monstro perdeu o jogador", como manda o contrato, inclusive a volta à patrulha logo depois de uma captura. O resumo conta do mesmo jeito, com uma exceção: o reset do monstro causado por uma captura.
+
+- Um `player_caught` encerra a caça na hora.
+- Um `attempt_start` no meio da caça também encerra, porque o jogo real pode reiniciar a tentativa sem mandar `player_caught`.
+- A primeira saída de `chase` depois disso é o reset e não conta como perda. Isso também vale quando ela chega colada logo antes do `player_caught`.
+- O resumo não depende de o jogo mandar esse reset. Uma saída de `chase` cuja entrada não chegou conta como perda, igual à linha do tempo.
 
 ## Estrutura
 

@@ -84,6 +84,71 @@ describe('summarizeGame', () => {
     assert.equal(s.inChaseNow, false);
   });
 
+  // Regressão: no jogo real, uma perda com "motivo: lost sight" aparecia na
+  // linha do tempo e não entrava no resumo.
+  it('captura sem saída de chase não engole a perda seguinte', () => {
+    seq = 0;
+    const s = summarizeGame([
+      e(0, 'session_start'),
+      sk(10, 'patrol', 'chase'),
+      e(15, 'player_caught', { attempt: 1 }), // o jogo reseta o monstro sem mandar chase -> patrol
+      e(16, 'attempt_start', { attempt: 2 }),
+      sk(40, 'patrol', 'alert'),
+      sk(42, 'alert', 'chase'),
+      e(50, 'seeker_state', { from: 'chase', to: 'alert', reason: 'lost sight' }),
+    ]);
+    assert.equal(s.lostPlayer, 1);
+    assert.equal(s.chases, 2);
+    assert.equal(s.chaseSec, 5 + 8);
+    assert.equal(s.captures, 1);
+  });
+
+  it('saída de chase sem a entrada ter chegado conta como perda (igual à linha do tempo)', () => {
+    seq = 0;
+    const s = summarizeGame([e(0, 'session_start'), sk(42, 'chase', 'alert')]);
+    assert.equal(s.lostPlayer, 1);
+  });
+
+  it('reset que vem logo antes do player_caught não é perda', () => {
+    seq = 0;
+    const s = summarizeGame([
+      e(0, 'session_start'),
+      sk(10, 'patrol', 'chase'),
+      sk(15, 'chase', 'patrol'),
+      e(15.2, 'player_caught', { attempt: 1 }),
+    ]);
+    assert.equal(s.lostPlayer, 0);
+    assert.equal(s.captures, 1);
+    assert.equal(s.chaseSec, 5);
+  });
+
+  it('attempt_start no meio da caça encerra a caça; o reset depois não é perda', () => {
+    seq = 0;
+    const s = summarizeGame([
+      e(0, 'session_start'),
+      sk(10, 'patrol', 'chase'),
+      e(14, 'attempt_start', { attempt: 2 }),
+      sk(14.5, 'chase', 'patrol'),
+      sk(30, 'patrol', 'chase'),
+      sk(36, 'chase', 'alert'),
+    ]);
+    assert.equal(s.lostPlayer, 1, 'só a perda de 36 s');
+    assert.equal(s.chases, 2);
+    assert.equal(s.chaseSec, 4 + 6);
+  });
+
+  it('o reset pendente expira na próxima caça', () => {
+    seq = 0;
+    const s = summarizeGame([
+      e(0, 'session_start'),
+      sk(10, 'patrol', 'chase'),
+      e(12, 'player_caught', { attempt: 1 }),
+      sk(20, 'patrol', 'chase'),
+      sk(25, 'chase', 'alert'),
+    ]);
+    assert.equal(s.lostPlayer, 1);
+  });
+
   it('lacunas de seq', () => {
     seq = 0;
     const events = [e(0, 'session_start'), e(1, 'x'), e(2, 'x'), e(3, 'x')];

@@ -37,10 +37,12 @@ const num = (d: Record<string, unknown>, k: string): number | null => {
 /**
  * Percorre os eventos em ordem de `seq` como uma máquina de estados do monstro.
  *
- * Decisão sobre "perdeu o jogador": pela regra do contrato, qualquer saída de
- * `chase` aparece na linha do tempo como "Monstro perdeu o jogador" — inclusive
- * a volta à patrulha logo após uma captura. No resumo, uma caça em que houve
- * `player_caught` conta como captura, não como perda.
+ * "Perdeu o jogador" segue a regra da linha do tempo: toda saída de `chase`
+ * conta, mesmo que a entrada em caça não tenha chegado. Única exceção: o reset
+ * do monstro causado por uma captura. A captura (ou um attempt_start no meio
+ * da caça) encerra a caça na hora, e a primeira saída de `chase` depois dela é
+ * o reset — também quando ela vem colada logo antes do player_caught. Não
+ * dependemos de o jogo mandar esse reset: se não mandar, a caça já foi fechada.
  *
  * Caça ainda aberta no fim conta até o `session_end` (ou até o último evento).
  */
@@ -65,11 +67,24 @@ export function summarizeGame(events: readonly GameEvent[]): GameSummary {
   if (sorted.length === 0) return s;
 
   let maxAttempt = 1;
+  /** t em que a caça atual começou, ou null fora de caça. */
   let chaseStart: number | null = null;
-  let caughtInChase = false;
+  /**
+   * A captura (ou nova tentativa) encerrou a caça; a próxima saída de `chase`
+   * que o jogo mandar é só o reset do monstro, não uma perda. Vale até a
+   * próxima entrada em caça — assim nunca "engole" uma perda real depois.
+   */
+  let resetPending = false;
   let endT = sorted[sorted.length - 1].t;
 
-  for (const e of sorted) {
+  const closeChase = (t: number) => {
+    if (chaseStart === null) return;
+    s.chaseSec += Math.max(0, t - chaseStart);
+    chaseStart = null;
+  };
+
+  for (let i = 0; i < sorted.length; i++) {
+    const e = sorted[i];
     const d = e.data ?? {};
     switch (e.type) {
       case 'tutorial_end':
@@ -79,23 +94,40 @@ export function summarizeGame(events: readonly GameEvent[]): GameSummary {
         const from = d.from;
         const to = d.to;
         if (from === 'patrol' && to === 'alert') s.alerts += 1;
-        if (to === 'chase' && chaseStart === null) {
-          s.chases += 1;
-          chaseStart = e.t;
-          caughtInChase = false;
-        } else if (from === 'chase' && to !== 'chase' && chaseStart !== null) {
-          s.chaseSec += Math.max(0, e.t - chaseStart);
-          if (!caughtInChase) s.lostPlayer += 1;
-          chaseStart = null;
+        if (to === 'chase') {
+          if (chaseStart === null) {
+            s.chases += 1;
+            chaseStart = e.t;
+          }
+          resetPending = false;
+        } else if (from === 'chase') {
+          // Mesma regra da linha do tempo: toda saída de chase é "perdeu o
+          // jogador", mesmo que a entrada não tenha chegado. Exceções: o reset
+          // depois de uma captura, e a saída que vem colada antes do
+          // player_caught (jogos que avisam o reset antes da captura).
+          const next = sorted[i + 1];
+          const captureRightAfter = next?.type === 'player_caught' && next.t - e.t <= 1;
+          closeChase(e.t);
+          if (resetPending) resetPending = false;
+          else if (!captureRightAfter) s.lostPlayer += 1;
         }
         break;
       }
       case 'player_caught':
         s.captures += 1;
-        if (chaseStart !== null) caughtInChase = true;
+        if (chaseStart !== null) {
+          closeChase(e.t);
+          resetPending = true;
+        }
         maxAttempt = Math.max(maxAttempt, num(d, 'attempt') ?? 1);
         break;
       case 'attempt_start':
+        // Nova tentativa no meio de uma caça: a caça acabou (o jogo pode
+        // reiniciar sem mandar player_caught).
+        if (chaseStart !== null) {
+          closeChase(e.t);
+          resetPending = true;
+        }
         maxAttempt = Math.max(maxAttempt, num(d, 'attempt') ?? 1);
         break;
       case 'key_collected': {
@@ -122,8 +154,8 @@ export function summarizeGame(events: readonly GameEvent[]): GameSummary {
   }
 
   if (chaseStart !== null) {
-    s.chaseSec += Math.max(0, endT - chaseStart);
     s.inChaseNow = !s.ended;
+    closeChase(endT);
   }
   s.attempts = maxAttempt;
 
