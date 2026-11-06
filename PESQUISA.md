@@ -19,10 +19,15 @@ Como um app Expo pode receber, em tempo real e por WebSocket, os eventos do noss
 - [ ] Unity: UnityWebRequest (https://docs.unity3d.com/ScriptReference/Networking.UnityWebRequest.html)
 - [ ] Supabase: Realtime, só para justificar o descarte (https://supabase.com/docs/guides/realtime)
 ## Onde a IA errou
-- Pedido: [o que foi pedido]
-- O que veio: [a resposta errada]
-- Como percebi: [erro de compilação, documentação, teste no aparelho]
-- O certo: [o que a documentação confirma]
+- Pedido: Analisar quando o monstro perde o jogador de vista usando analise dos estados da IA, desconsiderando quando a IA captura o jogador.
+- O que veio: Toda a vez que o monstro entra em caça ele considera, mas quando saía do estado de caça nunca considerava que perdeu, inflando o tempo de caça.
+- Como percebi: Fiz o teste diretamente no jogo.
+- O certo: Toda vez que o monstro sai do estado de caça, considera que perdeu o jogador, e caso haja uma captura ou um reset manual da tentativa ele também encerra a caça imediatamente.
+
+- Pedido: Anotar um evento toda vez que o jogador pegar uma chave durante o tempo de jogo.
+- O que veio: Toda a vez que pegava uma chave, registrava evento, inclusive quando pegava a chave obrigatória do tutorial.
+- Como percebi: Fiz o teste diretamente no jogo.
+- O certo: Só considerar o evento em chaves que foram criadas pelo KeySpawner, desconsiderando a chave colocada manualmente sem ter sido 'spawnada'.
 ## Resultado e próximos passos no TCC
-- [o que a prova de conceito demonstrou, critério por critério]
-- Próximo passo no TCC: usar o app em sessões de playtest com jogadores reais para comparar o agente de RL com uma versão com FSM. A ideia é cruzar as marcações do observador ("percebeu um padrão", "se assustou") com os eventos do monstro, gerando a evidência com humanos que o artigo hoje não tem (seções 6.6 e 8).
+- A nossa prova de conceito mostrou que o aplicativo hibrido está funcionando em conjunto com o jogo e capturando métricas em tempo real, possui persistência em caso de instabilidade, permite a captura de métricas customizadas do observador e não compromete o funcionamento do jogo.
+- Próximo passo no TCC: usar o app em sessões de playtest com jogadores reais para comparar o agente de RL com uma versão com FSM. A ideia é cruzar as marcações do observador ("se escondeu", "se assustou") com os eventos do monstro, gerando a evidência com humanos que o artigo hoje não tem (seções 6.6 e 8).
