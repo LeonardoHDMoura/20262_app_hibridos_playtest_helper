@@ -7,7 +7,7 @@ import { LiveClock } from '../components/LiveClock.tsx';
 import { SessionSummary } from '../components/SessionSummary.tsx';
 import { TimelineList } from '../components/TimelineList.tsx';
 import { colors, radius } from '../components/theme.ts';
-import { MANUAL_EVENT_TYPES } from '../domain/eventTypes.ts';
+import { BUTTON_EVENT_TYPES } from '../domain/eventTypes.ts';
 import { countByType } from '../domain/format.ts';
 import { gameEnded, timelineOriginMs } from '../domain/session.ts';
 import { gameEventText } from '../lib/eventLabels.ts';
@@ -87,7 +87,7 @@ export default function LiveScreen() {
       )}
 
       <View style={styles.grid}>
-        {MANUAL_EVENT_TYPES.map((t) => (
+        {BUTTON_EVENT_TYPES.map((t) => (
           <Pressable
             key={t.id}
             // onPressIn (e não onPress): o horário é o do contato do dedo, sem

@@ -91,6 +91,8 @@ export function SessionSummary({
   }
 
   const counts = countByType([...observerEvents]);
+  // Botões atuais sempre aparecem; os aposentados só em sessões que os usaram.
+  const observerTypes = MANUAL_EVENT_TYPES.filter((t) => !t.retired || (counts.get(t.id) ?? 0) > 0);
   return (
     <View style={{ gap: 14 }}>
       <View>
@@ -121,7 +123,7 @@ export function SessionSummary({
       <View>
         <Text style={styles.sectionTitle}>Observador</Text>
         <View style={styles.grid}>
-          {MANUAL_EVENT_TYPES.map((t) => (
+          {observerTypes.map((t) => (
             <View key={t.id} style={[styles.tile, { borderColor: t.color }]}>
               <Text style={[styles.tileValue, { color: t.color }]}>{counts.get(t.id) ?? 0}</Text>
               <Text style={styles.tileLabel}>{t.label}</Text>

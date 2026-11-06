@@ -176,4 +176,20 @@ describe('listagem e exclusão', () => {
     db.deleteSession(expo, s.id);
     assert.equal((raw.prepare('SELECT COUNT(*) AS n FROM timeline_items').get() as { n: number }).n, 0);
   });
+
+  it('sessões salvas com botões antigos continuam contando e carregando igual', async () => {
+    const { expo } = await freshDb();
+    const s = db.insertSession(expo, 'P01', T0);
+    db.insertObserverItem(expo, { sessionId: s.id, type: 'hesitou', wallMs: T0 + 1, t: 0, note: null });
+    db.insertObserverItem(expo, { sessionId: s.id, type: 'antecipou_ronda', wallMs: T0 + 2, t: 0, note: null });
+    db.saveSessionEnd(expo, s.id, T0 + 10_000);
+
+    const [summary] = await db.listFinishedSessions(expo);
+    assert.equal(summary.observerCount, 2);
+    const loaded = await db.loadSession(expo, s.id);
+    assert.deepEqual(
+      loaded?.events.map((e) => e.type),
+      ['hesitou', 'antecipou_ronda'],
+    );
+  });
 });

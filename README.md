@@ -1,6 +1,6 @@
 # Playtest Helper: marcador de eventos para o observador
 
-App em Expo (React Native + TypeScript) para usar **durante o playtest do jogo Unity**. Uma pessoa joga e outra segura o celular e toca em botões como *“se assustou”*, *“explorou a ronda fixa”*, *“se escondeu”* ou *“foi capturado”*. Cada toque grava o tempo em relação ao início da partida. No fim, o app mostra a **linha do tempo da sessão** e exporta um **CSV**.
+App em Expo (React Native + TypeScript) para usar **durante o playtest do jogo Unity**. Uma pessoa joga e outra segura o celular e toca em botões como *“se assustou”*, *“se escondeu”*, *“previu a rota do Monstro”* ou *“não entendeu mecânica do jogo”*. Cada toque grava o tempo em relação ao início da partida. No fim, o app mostra a **linha do tempo da sessão** e exporta um **CSV**.
 
 O objetivo é ter evidência concreta para a **seção 6.6 (comportamento)** e para o **problema da ronda fixa**.
 
@@ -70,7 +70,9 @@ curl -X POST http://localhost:8787/events -H "Content-Type: application/json" -d
 2. **Partida:** um relógio, seis botões coloridos com contador e a **linha do tempo unificada**, que junta os eventos do jogo (fundo cinza, etiqueta “Jogo”) e as marcações (etiqueta azul “Observador”). A lista acompanha o item mais novo, a não ser que você role para cima. Também há **Desfazer** (remove o último toque) e **Encerrar**. A tela não apaga durante a partida.
 3. **Linha do tempo:** um resumo por tipo, um gráfico em raias (uma linha por tipo de evento), a lista completa com `mm:ss.d` e o botão **Compartilhar CSV**.
 
-Os tipos de evento ficam em [`src/domain/eventTypes.ts`](src/domain/eventTypes.ts). Para mudar os botões, basta editar essa lista.
+Os tipos de evento ficam em [`src/domain/eventTypes.ts`](src/domain/eventTypes.ts). Os botões atuais são: *Se assustou*, *Se escondeu*, *Não viu uma chave*, *Correu fora de caça*, *Previu a rota do Monstro* e *Não entendeu mecânica do jogo*.
+
+Para mudar os botões, edite essa lista, mas **nunca renomeie nem apague um `id` que já tem dados gravados**: o banco e o CSV guardam o `id`. Para tirar um botão, marque o tipo como `retired: true`. Ele some da tela da partida, mas as sessões antigas continuam com o mesmo nome, cor, contagem e raia. Foi assim que saíram os botões da primeira versão (*Foi capturado*, *Hesitou / ficou parado*, *Explorou a ronda fixa*, *Antecipou a ronda*).
 
 ## Pergunta norteadora
 
@@ -206,4 +208,4 @@ sessao,participante,sessao_jogo,fonte,seq,tempo_s,tempo,tipo,texto,detalhe,horar
 
 - Juntar com a **sugestão 1** (estatísticas do playtest) e cruzar com a telemetria do Unity pelo `horario_iso`.
 - Campo de nota rápida por evento (a coluna `note` já existe no banco e no CSV).
-- Comparar sessões: tempo até a primeira captura, quantos “antecipou a ronda” depois da primeira volta da patrulha etc.
+- Comparar sessões: tempo até a primeira captura, quantos “previu a rota do Monstro” depois da primeira volta da patrulha etc.
