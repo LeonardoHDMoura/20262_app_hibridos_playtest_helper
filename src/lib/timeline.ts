@@ -21,6 +21,12 @@ export interface TimelineItem {
   color?: string;
   /** Evento automático do app (2º plano etc.), mostrado mais discreto. */
   system?: boolean;
+  /** Jogo: número de sequência e dados crus do evento. */
+  seq?: number;
+  data?: Record<string, unknown>;
+  /** Observador: horário do toque e nota. */
+  wallMs?: number;
+  note?: string | null;
 }
 
 export function buildTimeline(session: Session, observerEvents: readonly ObsEvent[], game: GameLink | null): TimelineItem[] {
@@ -36,6 +42,8 @@ export function buildTimeline(session: Session, observerEvents: readonly ObsEven
       label: def.label,
       color: def.color,
       system: !def.manual,
+      wallMs: e.wallMs,
+      note: e.note,
     };
   });
 
@@ -49,6 +57,8 @@ export function buildTimeline(session: Session, observerEvents: readonly ObsEven
       label: text.label,
       detail: text.detail,
       tone: text.tone,
+      seq: e.seq,
+      data: e.data,
     };
   });
 

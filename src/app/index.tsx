@@ -84,7 +84,9 @@ export default function HomeScreen() {
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={styles.rowTitle}>{formatMs(sessionDuration(item, item.endedAt ?? item.startedAt))}</Text>
-            <Text style={styles.muted}>{item.eventCount} eventos</Text>
+            <Text style={styles.muted}>
+              {item.observerCount} marcações{item.gameCount > 0 ? ` · ${item.gameCount} do jogo` : ''}
+            </Text>
           </View>
         </Pressable>
       )}

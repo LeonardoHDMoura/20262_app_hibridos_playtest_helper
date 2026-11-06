@@ -108,22 +108,31 @@ O [`SessionProvider`](src/state/SessionProvider.tsx) envolve o app inteiro (em [
 
 ### 3. Persistência: **persistir primeiro, despachar depois**
 
-Toda ação passa pelo SQLite **antes** de chegar ao reducer:
+Toda ação passa pelo SQLite **antes** de chegar ao reducer. Isso vale para as marcações, os eventos do jogo, a ligação com o jogo e a origem do relógio:
 
 ```
 toque → Date.now() → INSERT (runSync, commit no disco) → dispatch(ADD_EVENT) → UI
+relay → INSERT OR IGNORE (transação) → dispatch(GAME_EVENTS) → UI
 ```
 
 - As escritas usam a API **síncrona** do `expo-sqlite` (`runSync`). Quando a função retorna, a linha já está commitada. Um INSERT pequeno leva bem menos de 1 ms, então a UI não trava.
 - O banco usa `PRAGMA journal_mode = WAL`.
 - Assim, **não existe estado “só na memória”**. Se o Android matar o app em segundo plano um instante depois do toque, o evento já está gravado. Também não é preciso “salvar às pressas” no `AppState`, que não é confiável porque o sistema pode matar o processo sem aviso.
 
-Schema ([`src/db/database.ts`](src/db/database.ts)), migrado com `PRAGMA user_version`:
+Schema v2 ([`src/db/database.ts`](src/db/database.ts)), migrado com `PRAGMA user_version`. A migração da v1 converte as marcações antigas:
 
 ```sql
-sessions(id, label, started_at, ended_at, paused_ms, paused_at)
-events(id, session_id → sessions, type, t_ms, wall_ms, note)
+sessions(id, label, started_at, ended_at, game_session_id, game_origin_ms)
+timeline_items(id, session_id → sessions, source 'game'|'observer', game_session_id, seq,
+               type, t, wall_ms, data, label, note)
+UNIQUE (game_session_id, source, seq) WHERE source = 'game'   -- deduplicação
 ```
+
+- `t` está em segundos desde o início da sessão. Quando a origem do relógio muda, o `t` das marcações é recalculado a partir de `wall_ms`, o horário do toque.
+- Ao reabrir o app, a sessão volta já ligada ao jogo. O replay do relay só acrescenta o que faltou.
+- Uma observação encerrada nunca é reaberta pelo replay.
+
+Os testes de [`tests/database.test.ts`](tests/database.test.ts) rodam esse código contra um SQLite real (`node:sqlite`), incluindo a migração da v1.
 
 ### 4. Segundo plano e reabertura
 
@@ -136,26 +145,36 @@ events(id, session_id → sessions, type, t_ms, wall_ms, note)
 ```
 src/
   app/                  rotas (expo-router)
-    _layout.tsx         SQLiteProvider + SessionProvider + Stack
+    _layout.tsx         SQLiteProvider + GameLinkProvider + SessionProvider + Stack
     index.tsx           início: nova partida / retomar / histórico
-    live.tsx            botões de marcação durante a partida
-    session/[id].tsx    linha do tempo + CSV
+    live.tsx            marcação + linha do tempo ao vivo
+    session/[id].tsx    linha do tempo de uma sessão encerrada + CSV
+    settings.tsx        conexão com o relay + eventos crus
   domain/               código puro e testável
-    session.ts          tipos, reducer, cálculo de tempo
+    session.ts          tipos, reducer, relógio, rota dos eventos do jogo
     eventTypes.ts       catálogo de botões
-    format.ts           mm:ss.d, CSV, contagens
+    format.ts           mm:ss.d, contagens
+  lib/                  código puro e testável
+    relay.ts            contrato v1, mensagens do relay, dedup
+    eventLabels.ts      evento do jogo → texto
+    timeline.ts         linha do tempo unificada
+    exportCsv.ts        CSV
+  hooks/useGameEvents.ts      WebSocket com reconexão
   db/database.ts        schema, migração e consultas expo-sqlite
-  state/SessionProvider.tsx   useReducer + contextos + efeitos (AppState, hidratação)
-  components/           LiveClock, TimelineChart, tema
-tests/session.test.ts   testes do reducer e do tempo
+  state/                GameLinkProvider (conexão) e SessionProvider (useReducer + efeitos)
+  components/           relógio, linha do tempo, gráfico em raias, indicador de conexão
+relay/                  relay Node + simulador
+tests/                  node:test (reducer, relay, textos, banco)
 ```
 
 ## CSV exportado
 
+Uma linha por item da linha do tempo unificada. No observador, `horario_iso` é o horário do toque. No jogo, é a origem + `t` no relógio do celular.
+
 ```
-sessao,participante,tempo_ms,tempo,evento_id,evento,categoria,horario_iso,nota
-3,P03,12450,00:12.4,susto,Se assustou,comportamento,2026-11-05T22:14:03.120Z,
-3,P03,47810,00:47.8,explorou_ronda,Explorou a ronda fixa,ronda,2026-11-05T22:14:38.480Z,
+sessao,participante,sessao_jogo,fonte,seq,tempo_s,tempo,tipo,texto,detalhe,horario_iso,dados,nota
+3,P03,7aa9…,jogo,6,69.012,01:09,seeker_state,Monstro achou o jogador (caça),motivo: saw_player,2026-11-06T19:20:11.512Z,"{""from"":""alert"",""to"":""chase"",""reason"":""saw_player""}",
+3,P03,7aa9…,observador,,70.240,01:10,susto,Se assustou,,2026-11-06T19:20:12.740Z,,
 ```
 
 ## Próximos passos possíveis

@@ -6,7 +6,9 @@ import { MANUAL_EVENT_TYPES } from '../domain/eventTypes.ts';
 import {
   groupByGameSession,
   initialSessionState,
+  nextOriginMs,
   routeGameEvents,
+  secondsAt,
   sessionReducer,
   type ObsEvent,
   type Session,
@@ -28,6 +30,7 @@ const StateContext = createContext<SessionState | null>(null);
 const ActionsContext = createContext<SessionActions | null>(null);
 
 const MANUAL_IDS = new Set(MANUAL_EVENT_TYPES.map((t) => t.id));
+const NO_FINISHED: ReadonlySet<string> = new Set();
 
 function labelForGame(events: readonly GameEvent[], at: number): string {
   const start = events.find((e) => e.type === 'session_start');
@@ -39,10 +42,9 @@ function labelForGame(events: readonly GameEvent[], at: number): string {
 /**
  * Estado global da observação em andamento, incluindo a sessão do jogo ligada.
  *
- * Regra de ouro das marcações: **persistir primeiro, despachar depois** — toda
- * marcação passa pelo SQLite (escrita síncrona) antes de chegar ao reducer.
- * Eventos do jogo ainda ficam só na memória (etapa 3); se o app fechar, o
- * replay do relay os devolve.
+ * Regra de ouro: **persistir primeiro, despachar depois**. Marcações, eventos
+ * do jogo, ligação com o jogo e origem do relógio passam pelo SQLite (escrita
+ * síncrona) antes de chegar ao reducer — a tela nunca está "à frente" do disco.
  */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const database = useSQLiteContext();
@@ -54,8 +56,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const sessionRef = useRef<Session | null>(null);
   const eventsRef = useRef<ObsEvent[]>([]);
   const gameIdRef = useRef<string | null>(null);
-  /** Jogos cujas observações foram encerradas: o replay não pode reabri-los. */
-  const finishedGamesRef = useRef(new Set<string>());
+  const gameOriginRef = useRef<number | null>(null);
   /** Eventos do jogo que chegaram antes de lermos o banco. */
   const hydratedRef = useRef(false);
   const pendingRef = useRef<{ events: GameEvent[]; receivedAt: number }[]>([]);
@@ -79,11 +80,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const session = sessionRef.current;
       if (!session) return null;
       return guard('Registrar evento', () => {
-        const event = db.insertEvent(database, {
+        const origin = gameOriginRef.current ?? session.startedAt;
+        const event = db.insertObserverItem(database, {
           sessionId: session.id,
           type,
-          tMs: wallMs - session.startedAt,
           wallMs,
+          t: secondsAt(origin, wallMs),
           note,
         });
         eventsRef.current = [...eventsRef.current, event];
@@ -101,6 +103,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sessionRef.current = session;
         eventsRef.current = [];
         gameIdRef.current = null;
+        gameOriginRef.current = null;
         dispatch({ type: 'START', session });
         return session;
       }),
@@ -113,10 +116,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (!session) return null;
       return guard('Encerrar', () => {
         db.saveSessionEnd(database, session.id, at);
-        if (gameIdRef.current) finishedGamesRef.current.add(gameIdRef.current);
         sessionRef.current = null;
         eventsRef.current = [];
         gameIdRef.current = null;
+        gameOriginRef.current = null;
         dispatch({ type: 'END', at });
         return session.id;
       });
@@ -132,11 +135,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         return;
       }
       for (const [gameSessionId, group] of groupByGameSession(events)) {
+        const isLinked = gameIdRef.current === gameSessionId;
+        // Jogo com observação já encerrada no banco: o replay não pode reabri-lo.
+        let finished = NO_FINISHED;
+        if (!isLinked) {
+          try {
+            if (db.isGameSessionFinished(database, gameSessionId)) finished = new Set([gameSessionId]);
+          } catch (err) {
+            console.error(err);
+          }
+        }
         const route = routeGameEvents(
           {
             hasOpenSession: sessionRef.current !== null,
             linkedGameSessionId: gameIdRef.current,
-            finishedGameSessionIds: finishedGamesRef.current,
+            finishedGameSessionIds: finished,
           },
           gameSessionId,
           group,
@@ -146,21 +159,39 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (route === 'start' || route === 'replace') {
           if (!startSession(labelForGame(group, receivedAt), receivedAt)) continue;
         }
+
+        const session = sessionRef.current;
+        if (!session) continue;
+        const prevOrigin = gameIdRef.current === gameSessionId ? gameOriginRef.current : null;
+        // Mesma conta que o reducer faz, para o banco e a tela concordarem.
+        const origin = nextOriginMs(prevOrigin, group, receivedAt);
+        const saved = guard('Gravar eventos do jogo', () => {
+          db.insertGameEvents(database, session.id, group, receivedAt);
+          if (gameIdRef.current !== gameSessionId || origin !== prevOrigin) {
+            db.saveGameLink(database, session.id, gameSessionId, origin);
+          }
+          return true;
+        });
+        if (!saved) continue;
+
         gameIdRef.current = gameSessionId;
+        gameOriginRef.current = origin;
         dispatch({ type: 'GAME_EVENTS', gameSessionId, events: group, receivedAt });
       }
     },
-    [endSession, startSession],
+    [database, guard, endSession, startSession],
   );
 
   // 1) Reidratação: se o app morreu no meio da observação, ela volta.
   useEffect(() => {
     let cancelled = false;
-    const finish = (open: { session: Session; events: ObsEvent[] } | null) => {
+    const finish = (open: db.LoadedSession | null) => {
       if (cancelled) return;
       sessionRef.current = open?.session ?? null;
       eventsRef.current = open?.events ?? [];
-      dispatch({ type: 'HYDRATE', session: open?.session ?? null, events: open?.events ?? [] });
+      gameIdRef.current = open?.game?.sessionId ?? null;
+      gameOriginRef.current = open?.game?.originMs ?? null;
+      dispatch({ type: 'HYDRATE', session: open?.session ?? null, events: open?.events ?? [], game: open?.game ?? null });
       hydratedRef.current = true;
       const pending = pendingRef.current;
       pendingRef.current = [];
@@ -209,7 +240,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const last = [...eventsRef.current].reverse().find((e) => MANUAL_IDS.has(e.type));
         if (!last) return null;
         return guard('Desfazer', () => {
-          db.deleteEvent(database, last.id);
+          db.deleteObserverItem(database, last.id);
           eventsRef.current = eventsRef.current.filter((e) => e.id !== last.id);
           dispatch({ type: 'REMOVE_EVENT', id: last.id });
           return last;

@@ -1,18 +1,22 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { TimelineChart } from '../../components/TimelineChart.tsx';
+import { TimelineItemRow } from '../../components/TimelineItemRow.tsx';
 import { colors, radius } from '../../components/theme.ts';
-import { deleteSession, loadSession } from '../../db/database.ts';
-import { getEventType, MANUAL_EVENT_TYPES } from '../../domain/eventTypes.ts';
-import { countByType, eventsToCsv, formatMs } from '../../domain/format.ts';
-import { sessionDuration, type ObsEvent, type Session } from '../../domain/session.ts';
+import { deleteSession, loadSession, type LoadedSession } from '../../db/database.ts';
+import { MANUAL_EVENT_TYPES } from '../../domain/eventTypes.ts';
+import { countByType, formatMs } from '../../domain/format.ts';
+import { secondsAt, sessionDuration, timelineOriginMs } from '../../domain/session.ts';
+import { timelineToCsv } from '../../lib/exportCsv.ts';
+import { buildTimeline } from '../../lib/timeline.ts';
 
 export default function SessionTimelineScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const database = useSQLiteContext();
-  const [data, setData] = useState<{ session: Session; events: ObsEvent[] } | null | undefined>(undefined);
+  const [data, setData] = useState<LoadedSession | null | undefined>(undefined);
+  const items = useMemo(() => (data ? buildTimeline(data.session, data.events, data.game) : []), [data]);
 
   useEffect(() => {
     loadSession(database, Number(id))
@@ -38,13 +42,16 @@ export default function SessionTimelineScreen() {
     );
   }
 
-  const { session, events } = data;
+  const { session, events, game } = data;
   // Sessões listadas aqui já estão encerradas, então `endedAt` define a duração.
-  const duration = sessionDuration(session, session.endedAt ?? session.startedAt);
+  const endMs = session.endedAt ?? session.startedAt;
+  const duration = sessionDuration(session, endMs);
+  const durationSec = secondsAt(timelineOriginMs(session, game), endMs);
   const counts = countByType(events);
+  const gameCount = items.filter((i) => i.source === 'game').length;
 
   const onShare = () => {
-    Share.share({ title: `Playtest ${session.label}`, message: eventsToCsv(session, events) }).catch(console.error);
+    Share.share({ title: `Playtest ${session.label}`, message: timelineToCsv(session, game, items) }).catch(console.error);
   };
 
   const onDelete = () => {
@@ -66,7 +73,10 @@ export default function SessionTimelineScreen() {
       <View style={styles.card}>
         <Text style={styles.title}>{session.label}</Text>
         <Text style={styles.muted}>{new Date(session.startedAt).toLocaleString('pt-BR')}</Text>
-        <Text style={styles.duration}>Duração: {formatMs(duration)}</Text>
+        <Text style={styles.duration}>Duração da observação: {formatMs(duration)}</Text>
+        <Text style={styles.muted}>
+          {game ? `Jogo ligado · ${gameCount} eventos do jogo` : 'Sem jogo ligado (só marcações manuais)'}
+        </Text>
       </View>
 
       <View style={styles.card}>
@@ -83,21 +93,14 @@ export default function SessionTimelineScreen() {
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Linha do tempo</Text>
-        <TimelineChart events={events} durationMs={duration} />
+        <TimelineChart items={items} durationSec={durationSec} />
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Eventos ({events.length})</Text>
-        {events.map((e) => {
-          const def = getEventType(e.type);
-          return (
-            <View key={e.id} style={styles.eventRow}>
-              <Text style={styles.eventTime}>{formatMs(e.tMs)}</Text>
-              <View style={[styles.dot, { backgroundColor: def.color }]} />
-              <Text style={[styles.eventLabel, !def.manual && styles.muted]}>{def.label}</Text>
-            </View>
-          );
-        })}
+        <Text style={styles.sectionTitle}>Eventos ({items.length})</Text>
+        {items.map((item) => (
+          <TimelineItemRow key={item.key} item={item} />
+        ))}
       </View>
 
       <Pressable style={styles.primaryButton} onPress={onShare}>
@@ -129,10 +132,6 @@ const styles = StyleSheet.create({
   chip: { borderWidth: 1.5, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, minWidth: '30%', flexGrow: 1 },
   chipCount: { fontSize: 20, fontWeight: '800', fontVariant: ['tabular-nums'] },
   chipLabel: { fontSize: 12, color: colors.text },
-  eventRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 3 },
-  eventTime: { width: 64, fontVariant: ['tabular-nums'], fontWeight: '600', color: colors.text },
-  eventLabel: { color: colors.text },
-  dot: { width: 10, height: 10, borderRadius: 5 },
   primaryButton: { backgroundColor: colors.primary, borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
   primaryButtonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   deleteButton: { paddingVertical: 12, alignItems: 'center' },

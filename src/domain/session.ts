@@ -22,9 +22,7 @@ export interface ObsEvent {
   id: number;
   sessionId: number;
   type: string;
-  /** ms desde `startedAt` no momento do toque (valor legado; a tela usa `wallMs`). */
-  tMs: number;
-  /** Epoch ms do toque. É daqui que sai o tempo na linha do tempo. */
+  /** Epoch ms do toque. O t na linha do tempo é derivado daqui e da origem. */
   wallMs: number;
   note: string | null;
 }
@@ -59,7 +57,7 @@ export interface SessionState {
 }
 
 export type SessionAction =
-  | { type: 'HYDRATE'; session: Session | null; events: ObsEvent[] }
+  | { type: 'HYDRATE'; session: Session | null; events: ObsEvent[]; game: GameLink | null }
   | { type: 'START'; session: Session }
   | { type: 'ADD_EVENT'; event: ObsEvent }
   | { type: 'REMOVE_EVENT'; id: number }
@@ -86,6 +84,15 @@ export function sessionDuration(session: Session, nowMs: number): number {
   return Math.max(0, (session.endedAt ?? nowMs) - session.startedAt);
 }
 
+/**
+ * Nova origem do relógio após receber `events` em `receivedAt` (ver GameLink):
+ * o menor `chegada - t` entre a origem atual e os eventos recebidos.
+ */
+export function nextOriginMs(current: number | null, events: readonly GameEvent[], receivedAt: number): number {
+  const candidate = Math.min(...events.map((e) => receivedAt - e.t * 1000));
+  return current === null ? candidate : Math.min(current, candidate);
+}
+
 export function gameEnded(game: GameLink | null): boolean {
   return !!game && game.events.some((e) => e.type === 'session_end');
 }
@@ -98,7 +105,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         status: session ? 'running' : 'idle',
         session,
         events: session ? sortEvents(action.events) : [],
-        game: null,
+        game: session && action.game ? action.game : null,
       };
     }
 
@@ -122,8 +129,7 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
 
       const prev = state.game;
       const merged = mergeGameEvents(prev?.events ?? [], incoming);
-      const candidate = Math.min(...incoming.map((e) => action.receivedAt - e.t * 1000));
-      const originMs = prev ? Math.min(prev.originMs, candidate) : candidate;
+      const originMs = nextOriginMs(prev?.originMs ?? null, incoming, action.receivedAt);
       if (prev && merged.added === 0 && originMs === prev.originMs) return state;
 
       return { ...state, game: { sessionId: action.gameSessionId, originMs, events: merged.events } };

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { eventsToCsv, formatMs } from '../src/domain/format.ts';
+import { formatMs } from '../src/domain/format.ts';
+import { timelineToCsv } from '../src/lib/exportCsv.ts';
 import {
   gameEnded,
   groupByGameSession,
@@ -23,7 +24,6 @@ const ev = (id: number, wallOffsetMs: number, type = 'susto'): ObsEvent => ({
   id,
   sessionId: 1,
   type,
-  tMs: wallOffsetMs,
   wallMs: T0 + wallOffsetMs,
   note: null,
 });
@@ -44,6 +44,7 @@ describe('sessionReducer — observação', () => {
       type: 'HYDRATE',
       session: session(),
       events: [ev(2, 900), ev(1, 100)],
+      game: null,
     });
     assert.equal(s.status, 'running');
     assert.deepEqual(
@@ -53,15 +54,24 @@ describe('sessionReducer — observação', () => {
   });
 
   it('HYDRATE sem sessão (ou encerrada) vai para idle', () => {
-    assert.equal(sessionReducer(initialSessionState, { type: 'HYDRATE', session: null, events: [] }).status, 'idle');
+    assert.equal(sessionReducer(initialSessionState, { type: 'HYDRATE', session: null, events: [], game: null }).status, 'idle');
     const ended = sessionReducer(initialSessionState, {
       type: 'HYDRATE',
       session: session({ endedAt: T0 + 5 }),
       events: [ev(1, 1)],
+      game: { sessionId: 'G1', originMs: T0, events: [] },
     });
     assert.equal(ended.status, 'idle');
     assert.equal(ended.session, null);
     assert.equal(ended.events.length, 0);
+    assert.equal(ended.game, null);
+  });
+
+  it('HYDRATE restaura o jogo ligado (sessão reaberta continua no relógio do jogo)', () => {
+    const game = { sessionId: 'G1', originMs: T0 + 3_000, events: [gev(0, 0, 'session_start')] };
+    const s = sessionReducer(initialSessionState, { type: 'HYDRATE', session: session(), events: [], game });
+    assert.equal(s.game, game);
+    assert.equal(timelineOriginMs(s.session!, s.game), T0 + 3_000);
   });
 
   it('ADD_EVENT ignora duplicados e eventos de outra sessão', () => {
@@ -149,7 +159,7 @@ describe('sessionReducer — eventos do jogo e relógio', () => {
     assert.equal(s.game?.sessionId, 'G1');
     assert.equal(s.game?.events.length, 1);
 
-    const idle = sessionReducer(initialSessionState, { type: 'HYDRATE', session: null, events: [] });
+    const idle = sessionReducer(initialSessionState, { type: 'HYDRATE', session: null, events: [], game: null });
     assert.equal(sessionReducer(idle, { type: 'GAME_EVENTS', gameSessionId: 'G1', events: [gev(0, 0)], receivedAt: T0 }), idle);
   });
 
@@ -278,11 +288,25 @@ describe('format (legado)', () => {
     assert.equal(formatMs(3_723_900), '1:02:03.9');
   });
 
-  it('eventsToCsv escapa vírgulas e aspas', () => {
-    const csv = eventsToCsv(session({ label: 'P01, "turma A"' }), [{ ...ev(1, 1_500), note: 'olhou, voltou' }]);
-    const [header, row] = csv.split('\n');
-    assert.match(header, /^sessao,participante,tempo_ms/);
-    assert.match(row, /^1,"P01, ""turma A""",1500,00:01\.5,susto,Se assustou,comportamento,/);
-    assert.match(row, /,"olhou, voltou"$/);
+  it('timelineToCsv: jogo e observador, com escape de vírgulas e aspas', () => {
+    let st = sessionReducer(initialSessionState, { type: 'START', session: session({ label: 'P01, "turma A"' }) });
+    st = sessionReducer(st, { type: 'ADD_EVENT', event: { ...ev(1, 4_500), note: 'olhou, voltou' } });
+    st = sessionReducer(st, {
+      type: 'GAME_EVENTS',
+      gameSessionId: 'G1',
+      events: [{ ...gev(0, 0, 'key_collected'), data: { keyId: 'k1', total: 1, required: 3 } }],
+      receivedAt: T0 + 2_000,
+    });
+    const csv = timelineToCsv(st.session!, st.game, buildTimeline(st.session!, st.events, st.game));
+    const [header, gameRow, obsRow] = csv.split('\n');
+    assert.equal(header, 'sessao,participante,sessao_jogo,fonte,seq,tempo_s,tempo,tipo,texto,detalhe,horario_iso,dados,nota');
+    assert.equal(
+      gameRow,
+      `1,"P01, ""turma A""",G1,jogo,0,0.000,00:00,key_collected,Chave coletada (1/3),,${new Date(T0 + 2_000).toISOString()},"{""keyId"":""k1"",""total"":1,""required"":3}",`,
+    );
+    assert.equal(
+      obsRow,
+      `1,"P01, ""turma A""",G1,observador,,2.500,00:02,susto,Se assustou,,${new Date(T0 + 4_500).toISOString()},,"olhou, voltou"`,
+    );
   });
 });
