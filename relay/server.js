@@ -194,8 +194,10 @@ wss.on('connection', (socket, req) => {
   log(`app conectou de ${req.socket.remoteAddress} — replay de ${events.length} evento(s) (${wss.clients.size} conectado(s))`);
 });
 
-// Celular que perde o Wi-Fi deixa a conexão "pendurada"; o ping derruba essas
-// conexões mortas para o contador de clientes ficar correto.
+// Celular que perde o Wi-Fi deixa a conexão "pendurada": o ping do protocolo
+// WebSocket derruba essas conexões mortas no relay. A mensagem {kind:"ping"}
+// faz o mesmo do lado do app, que não enxerga os pings do protocolo: se ficar
+// muito tempo sem receber nada, o app reconecta.
 const heartbeat = setInterval(() => {
   for (const socket of wss.clients) {
     if (!socket.isAlive) {
@@ -205,6 +207,7 @@ const heartbeat = setInterval(() => {
     socket.isAlive = false;
     socket.ping();
   }
+  broadcast({ kind: 'ping' });
 }, HEARTBEAT_MS);
 wss.on('close', () => clearInterval(heartbeat));
 

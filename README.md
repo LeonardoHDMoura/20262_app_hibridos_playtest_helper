@@ -41,7 +41,9 @@ npm run simulate -- --speed 5   # a mesma sessão, 5x mais rápida
 | --- | --- |
 | `POST /events` | Recebe um evento ou uma lista. Responde `204`, ou `400` com a mensagem de erro. Um lote com algum evento inválido é rejeitado inteiro |
 | `GET /health` | `{ ok, clients, sessionId, events }` |
-| WebSocket `/ws` | Ao conectar, envia `{ kind: "replay", events }`. Depois, `{ kind: "event", event }` a cada evento novo |
+| WebSocket `/ws` | Ao conectar, envia `{ kind: "replay", events }`. Depois, `{ kind: "event", event }` a cada evento novo, e `{ kind: "ping" }` a cada 15 s para o app saber que a conexão está viva |
+
+**No app:** toque no indicador **“Jogo: …”** no topo de qualquer tela para abrir a tela de conexão. Ali você digita o endereço (que fica salvo), vê o estado da conexão e os eventos crus recebidos. A reconexão é automática, com espera de 1 s, 2 s, 4 s… até 10 s. Sem 40 s de mensagens, a conexão é considerada morta. Ao voltar, o replay preenche o que faltou e os eventos repetidos (`sessionId + seq`) são ignorados.
 
 - Um `session_start` com `sessionId` novo descarta o buffer da sessão anterior. Eventos repetidos (mesmo `sessionId + seq`) e eventos de outra sessão são ignorados.
 - Se o relay for reiniciado no meio de uma partida, ele adota o `sessionId` do primeiro evento que chegar.
