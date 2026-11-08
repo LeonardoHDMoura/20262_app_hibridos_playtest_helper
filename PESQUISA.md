@@ -6,7 +6,7 @@ Como um app Expo pode receber, em tempo real e por WebSocket, os eventos do noss
 ## Alternativas consideradas
 | Opção | Serve para | Decisão |
 |---|---|---|
-| WebSocket nativo do React Native + relay Node (`ws`) no PC do jogo | Empurrar eventos da rede local para o celular com baixa latência, sem serviço externo | **Sim.** Funciona sem internet, a Unity só precisa de `UnityWebRequest` (nativo) e o relay permite reenviar o histórico ao reconectar. *Confirmar na documentação que o WebSocket roda no Expo Go.* |
+| WebSocket nativo do React Native + relay Node (`ws`) no PC do jogo | Empurrar eventos da rede local para o celular com baixa latência, sem serviço externo | **Sim.** Funciona sem internet, a Unity só precisa de `UnityWebRequest` (nativo) e o relay permite reenviar o histórico ao reconectar. |
 | Polling HTTP com `fetch` (app pergunta ao relay a cada 1 s) | Buscar eventos novos periodicamente | **Não.** Mais simples, mas com atraso de até 1 s e tráfego constante. Fica como plano B se o WebSocket der problema. |
 | Supabase Realtime | Jogo grava numa tabela na nuvem e o app recebe as mudanças | **Não.** Exige internet no local do teste, conta e chave, e acrescenta latência da nuvem a dados que estão na mesma sala. Pode criar problemas durante um evento (Eureka). |
 | Servidor WebSocket dentro da Unity (sem relay) | Celular conecta direto no jogo | **Não.** Exige uma biblioteca de terceiros na Unity e mexe mais no projeto do jogo, que pode criar mais complexidade. |
